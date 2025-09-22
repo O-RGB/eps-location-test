@@ -268,18 +268,34 @@
 
         function handleError(error) {
             let message = 'Unknown error';
+            let suggestion = '';
+            
             switch(error.code) {
                 case error.PERMISSION_DENIED:
                     message = 'Location access denied';
+                    suggestion = 'Please allow location access and refresh';
                     break;
                 case error.POSITION_UNAVAILABLE:
                     message = 'Location unavailable';
+                    suggestion = 'Please check GPS and internet connection';
                     break;
                 case error.TIMEOUT:
                     message = 'Location request timeout';
+                    suggestion = 'GPS is taking too long, trying again...';
+                    // Try again with lower accuracy after timeout
+                    setTimeout(() => {
+                        const lowAccuracyOptions = {
+                            enableHighAccuracy: false,
+                            timeout: 15000,
+                            maximumAge: 30000
+                        };
+                        navigator.geolocation.getCurrentPosition(updateLocation, () => {}, lowAccuracyOptions);
+                    }, 2000);
                     break;
             }
-            document.getElementById('status').textContent = `Error: ${message}`;
+            
+            document.getElementById('status').textContent = `${message} - ${suggestion}`;
+            console.log('Geolocation error:', error);
         }
 
         function startTracking() {
@@ -288,22 +304,61 @@
                 return;
             }
 
-            const options = {
+            // Try high accuracy first
+            const highAccuracyOptions = {
                 enableHighAccuracy: true,
-                timeout: 5000,
-                maximumAge: 0
+                timeout: 15000,  // เพิ่มเวลา timeout
+                maximumAge: 5000 // ยอมรับข้อมูลเก่า 5 วินาที
             };
 
-            // Get initial position
-            navigator.geolocation.getCurrentPosition(updateLocation, handleError, options);
+            // Fallback options if high accuracy fails
+            const fallbackOptions = {
+                enableHighAccuracy: false,
+                timeout: 10000,
+                maximumAge: 10000
+            };
 
+            document.getElementById('status').textContent = 'Getting GPS location...';
+
+            // Try high accuracy first
+            navigator.geolocation.getCurrentPosition(
+                (position) => {
+                    updateLocation(position);
+                    startWatching(highAccuracyOptions);
+                }, 
+                (error) => {
+                    console.log('High accuracy failed, trying fallback...');
+                    document.getElementById('status').textContent = 'Trying alternative location method...';
+                    
+                    // Try fallback method
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            updateLocation(position);
+                            startWatching(fallbackOptions);
+                        },
+                        handleError,
+                        fallbackOptions
+                    );
+                }, 
+                highAccuracyOptions
+            );
+        }
+
+        function startWatching(options) {
             // Watch position updates
             watchId = navigator.geolocation.watchPosition(updateLocation, handleError, options);
             
-            // Force update every 1 second
+            // Update every 2 seconds instead of 1 (less aggressive)
             setInterval(() => {
-                navigator.geolocation.getCurrentPosition(updateLocation, handleError, options);
-            }, 1000);
+                navigator.geolocation.getCurrentPosition(
+                    updateLocation, 
+                    (error) => {
+                        // Ignore individual update errors, keep watching
+                        console.log('Update error:', error.message);
+                    }, 
+                    options
+                );
+            }, 2000);
         }
 
         // Start when page loads
